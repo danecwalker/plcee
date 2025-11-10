@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=800, height=480, initial-scale=1.0, user-scalable=no">
+    <title>Set Max Tension</title>
+    <!-- Styles copied from hmi_interface.html for consistency -->
+    <style>
+        /* Base and Reset */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none; /* Prevent text selection on touch */
+        }
+
+        html, body {
+            height: 100%;
+        }
+
+        body {
+            font-family: sans-serif;
+            background-color: #DCE1E6; 
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        /* Font for digital numbers */
+        .font-digital {
+            font-family: monospace;
+        }
+
+        /* Blinking animation for the alarm */
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .alarm-active {
+            animation: blink 1s linear infinite;
+        }
+
+        /* HMI Button Style (from main page) */
+        .hmi-button {
+            flex: 1;
+            white-space: nowrap;
+            padding: 0.75rem 0.5rem;
+            font-size: 0.875rem;
+            background-color: #B0B8C0;
+            border: 2px solid #707880;
+            border-radius: 8px;
+            font-weight: 700;
+            color: #2C3A48;
+            text-transform: uppercase;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1), inset 0 -3px 0 0 rgba(0,0,0,0.2);
+            transition: all 0.1s ease-in-out;
+            cursor: pointer;
+        }
+        .hmi-button:hover {
+            background-color: #C8CDD2;
+        }
+        .hmi-button:active {
+            background-color: #A0A8B0;
+            transform: translateY(2px);
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05), inset 0 -1px 0 0 rgba(0,0,0,0.2);
+        }
+
+        /* Green "Set" button */
+        .hmi-button-start {
+            background-color: #28A745;
+            border-color: #1E7E34;
+            color: white;
+        }
+        .hmi-button-start:hover { background-color: #218838; }
+        .hmi-button-start:active { background-color: #1E7E34; }
+
+        /* Top Alarm Bar (from main page) */
+        #alarm-bar {
+            width: 100%;
+            background-color: #DC2626;
+            color: #FFFFFF;
+            font-size: 1.25rem;
+            font-weight: 700;
+            text-align: center;
+            padding: 0.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        
+        /* Main Content Area */
+        main {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: row; /* Changed to row */
+            /* REMOVED: align-items: flex-start; */
+            /* (default is 'stretch', which is what we want) */
+            padding: 0.5rem;
+            background-color: #1F2937; /* Dark background like main page boxes */
+            color: white;
+            gap: 0.5rem; /* Space between numpad and inputs */
+        }
+        
+        /* Input area on the left */
+        .input-area {
+            /* EDITED: Changed from flex: 3 to flex: 1 (50% split) */
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            /* EDITED: Changed from center to flex-start (push to top) */
+            justify-content: flex-start;
+            gap: 0.5rem; /* Tweak gap */
+            /* REMOVED: justify-content: center; */
+        }
+
+        .page-title {
+            font-size: 1.25rem; /* text-2xl */
+            font-weight: 600;
+            color: #E5E7EB; /* text-gray-200 */
+            margin-bottom: 0.25rem; /* Add some space below title */
+        }
+        
+        .input-label {
+            font-size: 0.95rem; /* text-sm */
+            font-weight: 600;
+            color: #9CA3AF; /* text-gray-400 */
+            text-transform: uppercase;
+            margin-left: 0.25rem;
+        }
+
+        /* --- REMOVED: .input-with-preview style block --- */
+
+        /* Main display for the entered number */
+        .tension-display {
+            width: 100%;
+            background-color: #111827; /* bg-gray-900 */
+            color: #4ADE80; /* Green text */
+            padding: 0.5rem 0.75rem;
+            font-size: 2.5rem; /* text-4xl */
+            text-align: right;
+            border-radius: 0.375rem;
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+            border: 2px solid #374151; /* bg-gray-700 */
+            min-height: 3rem; /* Ensure consistent height */
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            /* --- REMOVED: flex-grow: 1; --- */
+        }
+        
+        /* Sub-displays for percentages */
+        .sub-tension-display {
+            width: 100%;
+            background-color: #111827;
+            color: #22D3EE; /* Cyan text */
+            padding: 0.5rem 0.75rem;
+            font-size: 1.75rem; /* text-3xl */
+            text-align: right;
+            border-radius: 0.375rem;
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+            border: 2px solid #374151;
+            min-height: 2.75rem;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            /* --- REMOVED: flex: 1; --- */
+        }
+        
+        /* --- EDITED: Style for the preview box (now in results area) --- */
+        .tension-preview {
+            color: #E5E7EB; /* Lighter text */
+            font-size: 1.5rem; /* text-2xl */
+            font-weight: 600;
+            text-align: right;
+            white-space: nowrap;
+        }
+        /* --- END EDIT --- */
+        
+        /* Highlight for the active input */
+        .active-input {
+            border-color: #4ADE80; /* Green border */
+            box-shadow: 0 0 10px #4ADE80, inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+        }
+
+        /* --- NEW: Styles for Results Area --- */
+        .results-divider {
+            height: 2px;
+            background-color: #374151; /* Lighter gray than background */
+            width: 100%;
+            margin: 0.5rem 0;
+        }
+
+        .results-area {
+            display: flex;
+            flex-direction: column;
+            gap: 0.375rem;
+        }
+
+        .results-title {
+            font-size: 1rem; /* text-xl */
+            font-weight: 600;
+            color: #E5E7EB; /* text-gray-200 */
+            text-align: center;
+        }
+
+        .result-preview {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 0.25rem;
+        }
+
+        .result-label {
+            font-size: 1rem; /* text-lg */
+            font-weight: 600;
+            color: #9CA3AF; /* text-gray-400 */
+        }
+        /* --- END NEW --- */
+
+        /* --- NEW: Side-by-side percentage inputs --- */
+        .percentage-inputs {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .percentage-input-group {
+            flex: 1;
+        }
+        /* --- END NEW --- */
+
+
+        /* Numpad styles */
+        .numpad-container {
+            /* EDITED: Changed from flex: 2 to flex: 1 (50% split) */
+            flex: 1;
+            height: 100%;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            /* EDITED: Added grid-template-rows */
+            grid-template-rows: repeat(4, 1fr);
+            gap: 0.5rem; /* gap-3 */
+            /* REMOVED: width: 60%; */
+            /* REMOVED: max-width: 350px; */
+        }
+
+        .numpad-button {
+            /* Use HMI button styles but larger */
+            /* REMOVED: padding: 1rem; */
+            /* EDITED: Added flex display to center text */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem; /* text-xl */
+            font-weight: 700;
+            color: #2C3A48;
+            background-color: #B0B8C0;
+            border: 2px solid #707880;
+            border-radius: 6px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1), inset 0 -3px 0 0 rgba(0,0,0,0.2);
+            transition: all 0.1s ease-in-out;
+            cursor: pointer;
+            text-align: center;
+        }
+        .numpad-button:hover {
+            background-color: #C8CDD2;
+        }
+        .numpad-button:active {
+            background-color: #A0A8B0;
+            transform: translateY(2px);
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05), inset 0 -1px 0 0 rgba(0,0,0,0.2);
+        }
+        /* Make Clear button span 1 column */
+        .numpad-button.clear {
+            grid-column: 1 / 2;
+        }
+        /* Make 0 span 1 column */
+        .numpad-button.zero {
+            grid-column: 2 / 3;
+        }
+
+
+        /* Bottom Button Bar */
+        footer {
+            width: 100%;
+            background-color: #1F2937; /* Dark background */
+            padding: 0.5rem;
+            box-shadow: 0 -4px 10px -1px rgba(0,0,0,0.1);
+        }
+
+        footer div {
+            display: flex;
+            flex-wrap: nowrap;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+
+    <!-- Top Alarm Bar -->
+    <div id="alarm-bar" class="alarm-active">
+        ALARM: E-STOP ACTIVATED
+    </div>
+
+    <!-- Main Content Area -->
+    <main>
+        <!-- Left Side: Inputs -->
+        <div class="input-area">
+            <h2 class="page-title">Tension Settings</h2>
+        
+            <!-- Max Tension Input Display -->
+            <div>
+                <label class="input-label" for="max-tension-input">Max Tension (kg)</label>
+                <!-- --- EDITED: Removed wrapper div --- -->
+                <div id="max-tension-input" class="tension-display font-digital active-input" data-key="maxTension">0</div>
+                 <!-- --- END EDIT --- -->
+            </div>
+
+            <!-- Warning & Error % Inputs Side-by-Side -->
+            <div class="percentage-inputs">
+                <!-- Warning % Input Display -->
+                <div class="percentage-input-group">
+                    <label class="input-label" for="warning-percent-input">Warning (%)</label>
+                    <!-- --- EDITED: Removed wrapper and preview --- -->
+                    <div id="warning-percent-input" class="sub-tension-display font-digital" data-key="warning">0</div>
+                    <!-- --- END EDIT --- -->
+                </div>
+
+                <!-- Error % Input Display -->
+                <div class="percentage-input-group">
+                    <label class="input-label" for="error-percent-input">Error (%)</label>
+                    <!-- --- EDITED: Removed wrapper and preview --- -->
+                    <div id="error-percent-input" class="sub-tension-display font-digital" data-key="error">0</div>
+                    <!-- --- END EDIT --- -->
+                </div>
+            </div>
+
+            <!-- --- NEW: Results Section --- -->
+            <div class="results-divider"></div>
+            <div class="results-area">
+                <h3 class="results-title">Calculated Results</h3>
+                <div class="result-preview">
+                    <span class="result-label">Warning At:</span>
+                    <div id="warning-preview-kg" class="tension-preview font-digital">0.0 kg</div>
+                </div>
+                <div class="result-preview">
+                    <span class="result-label">Error At:</span>
+                    <div id="error-preview-kg" class="tension-preview font-digital">0.0 kg</div>
+                </div>
+            </div>
+            <!-- --- END NEW --- -->
+
+        </div>
+
+        <!-- Right Side: Numpad -->
+        <div class="numpad-container">
+            <button class="numpad-button" data-key="1">1</button>
+            <button class="numpad-button" data-key="2">2</button>
+            <button class="numpad-button" data-key="3">3</button>
+            <button class="numpad-button" data-key="4">4</button>
+            <button class="numpad-button" data-key="5">5</button>
+            <button class="numpad-button" data-key="6">6</button>
+            <button class="numpad-button" data-key="7">7</button>
+            <button class="numpad-button" data-key="8">8</button>
+            <button class="numpad-button" data-key="9">9</button>
+            <button class="numpad-button clear" data-key="C">C</button>
+            <button class="numpad-button zero" data-key="0">0</button>
+            <button class="numpad-button" data-key=".">.</button>
+        </div>
+    </main>
+
+    <!-- Bottom Button Bar -->
+    <footer>
+        <div>
+            <button id="set-button" class="hmi-button hmi-button-start">Set & Save</button>
+            <button id="back-button" class="hmi-button">Back</button>
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const res = await fetch("http://localhost:8080/snapshot");
+            const snapshot = await res.json();
+
+            const alarmBar = document.getElementById('alarm-bar');
+            const numpadButtons = document.querySelectorAll('.numpad-button');
+            const setButton = document.getElementById('set-button');
+            const backButton = document.getElementById('back-button');
+
+            const maxTensionInput = document.getElementById('max-tension-input');
+            const warningPercentInput = document.getElementById('warning-percent-input');
+            const errorPercentInput = document.getElementById('error-percent-input');
+            maxTensionInput.textContent = `${snapshot["MaxTensionValue"]}`;
+            warningPercentInput.textContent =  `${snapshot["WarnTensionPercent"]*100}`;
+            errorPercentInput.textContent = `${snapshot["ErrorTensionPercent"]*100}`;
+            
+            // --- NEW: Get preview elements ---
+            const warningPreviewKg = document.getElementById('warning-preview-kg');
+            const errorPreviewKg = document.getElementById('error-preview-kg');
+            // --- END NEW ---
+            
+            const inputElements = {
+                maxTension: maxTensionInput,
+                warning: warningPercentInput,
+                error: errorPercentInput
+            };
+
+            // Store values in an object
+            let inputValues = {
+                maxTension: `${snapshot["MaxTensionValue"]}`,
+                warning: `${snapshot["WarnTensionPercent"]*100}`,
+                error: `${snapshot["ErrorTensionPercent"]*100}`
+            };
+            updatePreviews();
+
+            let activeInputKey = "maxTension"; // Start with max tension active
+            const MAX_LENGTH = 6;
+
+            // --- SendCommand (copied from main page) ---
+            const sendCommand = async (command, value = null) => {
+              try {
+                const res = await fetch("http://localhost:8080/command", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    Name: command,
+                    Data: value
+                  })
+                })
+              } catch (error) {
+                  console.error("Failed to send command:", error);
+                  // Optionally update alarm bar if API fails
+                  alarmBar.classList.add('alarm-active');
+                  alarmBar.style.backgroundColor = '#DC2626';
+                  alarmBar.textContent = "ALARM: PLC CONNECTION FAILED";
+              }
+            }
+            
+            // --- NEW: Function to update previews ---
+            function updatePreviews() {
+                const maxTension = parseFloat(inputValues.maxTension) || 0;
+                const warningPercent = parseFloat(inputValues.warning) || 0;
+                const errorPercent = parseFloat(inputValues.error) || 0;
+
+                const warningKg = (maxTension * warningPercent) / 100;
+                const errorKg = (maxTension * errorPercent) / 100;
+
+                warningPreviewKg.textContent = `= ${warningKg.toFixed(1)} kg`;
+                errorPreviewKg.textContent = `= ${errorKg.toFixed(1)} kg`;
+            }
+            // --- END NEW ---
+
+            // --- Function to set active input ---
+            function setActiveInput(key) {
+                // Remove active class from all
+                Object.values(inputElements).forEach(el => {
+                    el.classList.remove('active-input');
+                });
+                
+                // Add active class to the new one
+                inputElements[key].classList.add('active-input');
+                activeInputKey = key;
+            }
+            
+            // --- Add click listeners to input displays ---
+            Object.keys(inputElements).forEach(key => {
+                inputElements[key].addEventListener('click', () => {
+                    setActiveInput(key);
+                });
+            });
+
+            // --- Numpad Logic ---
+            numpadButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const key = button.dataset.key;
+                    let currentValue = inputValues[activeInputKey]; // Get current value for active input
+
+                    if (key === 'C') {
+                        currentValue = "0";
+                    } else if (key === '.') {
+                        // --- EDITED: Add 100% check ---
+                        if (activeInputKey === 'warning' || activeInputKey === 'error') {
+                            // Don't allow decimal if value is already 100
+                            if (currentValue !== "100" && !currentValue.includes('.')) {
+                                currentValue += '.';
+                            }
+                        } else {
+                            // Original logic for maxTension
+                            if (!currentValue.includes('.')) {
+                                currentValue += '.';
+                            }
+                        }
+                        // --- END EDIT ---
+                    } else { // Number key
+                        let potentialValue = currentValue;
+                        if (currentValue === "0") {
+                            potentialValue = key;
+                        } else if (currentValue.length < MAX_LENGTH) {
+                            potentialValue += key;
+                        }
+
+                        // --- EDITED: Add 100% check ---
+                        if (activeInputKey === 'warning' || activeInputKey === 'error') {
+                            if (parseFloat(potentialValue) <= 100) {
+                                currentValue = potentialValue;
+                            }
+                            // If potentialValue > 100, currentValue is NOT updated,
+                            // effectively ignoring the keypress.
+                        } else {
+                            // This is 'maxTension', apply original logic
+                            currentValue = potentialValue;
+                        }
+                        // --- END EDIT ---
+                    }
+                    
+                    // Update the value in our store and on the display
+                    inputValues[activeInputKey] = currentValue;
+                    inputElements[activeInputKey].textContent = currentValue;
+                    
+                    // --- NEW: Call preview update ---
+                    updatePreviews();
+                    // --- END NEW ---
+                });
+            });
+
+            // --- Footer Button Logic ---
+            setButton.addEventListener('click', () => {
+                const maxTension = parseFloat(inputValues.maxTension);
+                const warningPercent = parseFloat(inputValues.warning);
+                const errorPercent = parseFloat(inputValues.error);
+
+                // Send all three commands
+                if (!isNaN(maxTension)) {
+                    console.log(`Sending command: SetMaxTension, Value: ${maxTension}`);
+                    sendCommand("SetMaxTension", maxTension);
+                }
+                if (!isNaN(warningPercent)) {
+                    console.log(`Sending command: SetWarningPercent, Value: ${warningPercent}`);
+                    sendCommand("SetWarn", warningPercent/100);
+                }
+                if (!isNaN(errorPercent)) {
+                    console.log(`Sending command: SetErrorPercent, Value: ${errorPercent}`);
+                    sendCommand("SetOverload", errorPercent/100);
+                }
+                
+                // Go back after setting
+                window.location.href = '/';
+            });
+
+            backButton.addEventListener('click', () => {
+                window.location.href = '/';
+            });
+
+            // --- Alarm Bar Logic (copied from main page) ---
+            alarmBar.addEventListener('click', () => {
+                if (alarmBar.classList.contains('alarm-active')) {
+                    alarmBar.classList.remove('alarm-active');
+                    alarmBar.style.backgroundColor = '#FBBF24'; // bg-yellow-500
+                    alarmBar.textContent = "ALARM ACKNOWLEDGED (E-STOP)";
+                } else {
+                    alarmBar.classList.add('alarm-active');
+                    alarmBar.style.backgroundColor = '#DC2626'; // bg-red-600
+                    alarmBar.textContent = "ALARM: E-STOP ACTIVATED";
+                }
+            });
+
+            // --- NEW: Initial call to set previews ---
+            updatePreviews();
+            // --- END NEW ---
+        });
+    </script>
+
+</body>
+</html>

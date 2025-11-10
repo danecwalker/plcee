@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=800, height=480, initial-scale=1.0, user-scalable=no">
+    <title>Web HMI Interface</title>
+    <!-- All CDN links removed. Styles are now self-contained below. -->
+    <style>
+        /* Base and Reset */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        html, body {
+            height: 100%;
+        }
+
+        body {
+            font-family: sans-serif; /* Replaced Inter with system font */
+            /* A common HMI background color */
+            background-color: #DCE1E6; 
+            overflow: hidden; /* Prevent scrolling */
+            
+            /* (from tailwind) flex flex-col h-screen */
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        /* Font for digital numbers */
+        .font-digital {
+            font-family: monospace; /* Replaced Roboto Mono with system font */
+        }
+
+        /* Blinking animation for the alarm */
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .alarm-active {
+            animation: blink 1s linear infinite;
+        }
+
+        /* HMI Button Style (existing) */
+        .hmi-button {
+            /* --- NEW: Equal width --- */
+            flex: 1; /* Makes all buttons grow equally */
+            white-space: nowrap; /* Prevents text wrapping */
+
+            /* --- ADJUSTED for 800x480 --- */
+            padding: 0.75rem 0.5rem; /* Reduced padding */
+            font-size: 0.875rem; /* 14px (was 18px) */
+
+            /* --- Original --- */
+            background-color: #B0B8C0;
+            border: 2px solid #707880;
+            border-radius: 8px;
+            font-weight: 700;
+            color: #2C3A48;
+            text-transform: uppercase;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1), inset 0 -3px 0 0 rgba(0,0,0,0.2);
+            transition: all 0.1s ease-in-out;
+            cursor: pointer;
+        }
+        .hmi-button:hover {
+            background-color: #C8CDD2;
+        }
+        .hmi-button:active {
+            background-color: #A0A8B0;
+            transform: translateY(2px);
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05), inset 0 -1px 0 0 rgba(0,0,0,0.2);
+        }
+
+        /* Specific styles for START and STOP buttons (existing) */
+        /* These are in the file but not currently used by the HTML */
+        .hmi-button-start {
+            background-color: #28A745; /* Green */
+            border-color: #1E7E34;
+            color: white;
+        }
+        .hmi-button-start:hover { background-color: #218838; }
+        .hmi-button-start:active { background-color: #1E7E34; }
+
+        .hmi-button-stop {
+            background-color: #DC3545; /* Red */
+            border-color: #B02A37;
+            color: white;
+        }
+        .hmi-button-stop:hover { background-color: #C82333; }
+        .hmi-button-stop:active { background-color: #B02A37; }
+
+        /* --- CSS Translated from Tailwind --- */
+
+        /* Top Alarm Bar */
+        #alarm-bar {
+            /* w-full bg-red-600 text-white text-2xl font-bold text-center p-3 shadow-lg */
+            width: 100%;
+            background-color: #DC2626; /* bg-red-600 */
+            color: #FFFFFF;
+            font-size: 1.25rem; /* text-xl */
+            font-weight: 700; /* font-bold */
+            text-align: center;
+            padding: 0.5rem; /* p-2 */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); /* shadow-lg */
+        }
+        
+        /* Main Content Area */
+        main {
+            /* flex-grow flex items-center justify-center p-4 */
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem; /* p-4 */
+            background-color: #1F2937; /* Dark gray background like the old cards */
+        }
+
+        /* Readouts Container - holds both readouts vertically */
+        .readouts-container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            height: 100%;
+            gap: 1rem;
+        }
+
+        /* Individual Readout - takes half the space vertically */
+        .readout-half {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Divider between readouts */
+        .readout-divider {
+            height: 2px;
+            background-color: #374151; /* Lighter gray than background */
+            width: 80%;
+            margin: 0 auto;
+        }
+
+        /* Display Box Title (Weight/Length) - REMOVED */
+        /* .display-box h2 { ... } */
+
+        /* Readout Container (holds number and unit) */
+        .readout-container {
+            /* font-digital is on parent */
+            display: flex;
+            justify-content: center;
+            align-items: baseline; /* Aligns number and unit nicely */
+            gap: 0.5rem; /* Space between number and unit */
+        }
+
+        /* Number Readout (125.4) */
+        .readout-number {
+            font-size: 6rem; /* Larger since we have more space */
+            font-weight: 700; /* font-bold */
+        }
+
+        /* Unit (kg/m) */
+        .unit {
+            color: #9CA3AF; /* text-gray-400 */
+            font-size: 2rem; /* Larger unit text */
+            font-weight: 600; /* font-semibold */
+        }
+
+        /* Bottom Button Bar */
+        footer {
+            /* w-full bg-gray-300 p-4 shadow-[...] */
+            width: 100%;
+            background-color: #1F2937; /* Dark gray background like the old cards */
+            padding: 0.5rem; /* p-2 (was 1rem) */
+            box-shadow: 0 -4px 10px -1px rgba(0,0,0,0.1);
+        }
+
+        footer div {
+            /* flex flex-wrap justify-center items-center gap-4 */
+            display: flex;
+            flex-wrap: nowrap; /* (was wrap) */
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem; /* gap-2 (was 1rem) */
+        }
+
+        #lo-speed.speed-active {
+          background-color: #55f382;
+          transform: translateY(2px);
+          box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05), inset 0 -1px 0 0 rgba(0,0,0,0.2);
+        }
+
+        #hi-speed.speed-active {
+          background-color: #55f382;
+          transform: translateY(2px);
+          box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05), inset 0 -1px 0 0 rgba(0,0,0,0.2);
+        }
+
+        /* --- Responsive Styles --- */
+        /* 800x480 screen will trigger this block */
+        @media (min-width: 768px) { /* md: */
+            main {
+                padding: 1rem;
+            }
+
+            .readout-number {
+                font-size: 8rem;
+            }
+
+            .unit {
+                font-size: 2.5rem;
+            }
+
+            footer div {
+                justify-content: space-around; /* md:justify-around */
+                gap: 0.5rem; /* md:gap-2 */
+            }
+        }
+
+        @media (min-width: 1024px) { /* lg: */
+            main {
+                padding: 1rem;
+            }
+            .readout-number {
+                font-size: 12rem; 
+            }
+            .unit {
+                font-size: 3rem;
+            }
+        }
+
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+
+    <!-- Top Alarm Bar -->
+    <div id="alarm-bar" class="alarm-active">
+        ALARM: E-STOP ACTIVATED
+    </div>
+
+    <!-- Main Content Area (Numerical Displays) -->
+    <main>
+        <div class="readouts-container">
+            <!-- KG Display - Top Half -->
+            <div class="readout-half">
+                <div class="readout-container font-digital">
+                    <div id="kg-display" class="readout-number" style="color: #4ADE80;">0.0</div>
+                    <span class="unit">kg</span>
+                </div>
+            </div>
+
+            <!-- Divider -->
+            <div class="readout-divider"></div>
+
+            <!-- Meter Display - Bottom Half -->
+            <div class="readout-half">
+                <div class="readout-container font-digital">
+                    <div id="m-display" class="readout-number" style="color: #22D3EE;">0.0</div>
+                    <span class="unit">m</span>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Bottom Button Bar -->
+    <footer>
+        <div>
+            <!-- Button text and styles updated as requested -->
+            <button class="hmi-button">Zero Distance</button>
+            <button class="hmi-button">Set Tension</button>
+            <button class="hmi-button">Calibration</button>
+            <button id="lo-speed" class="hmi-button">Lo Speed</button>
+            <button id="hi-speed" class="hmi-button">Hi Speed</button>
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const kgDisplay = document.getElementById('kg-display');
+            const mDisplay = document.getElementById('m-display');
+            const alarmBar = document.getElementById('alarm-bar');
+
+            const fetchSnapshot = async () => {
+              const res = await fetch("http://localhost:8080/snapshot")
+              const jsn = await res.json()
+              return jsn
+            }
+
+            const sendCommand = async (command, value = null) => {
+              const res = await fetch("http://localhost:8080/command", {
+                method: "POST",
+                body: JSON.stringify({
+                  Name: command,
+                  Data: value
+                })
+              })
+            }
+
+            // Simulate live data updates
+            setInterval(async () => {
+                const v = await fetchSnapshot()
+                // Simulate KG data (e.g., 125 +/- 2)
+                let kgValue = v["Load"]
+                kgDisplay.textContent = kgValue.toFixed(1);
+
+                // Simulate Meter data (e.g., 8.7 +/- 0.1)
+                let mValue =  v["ProxValue"];
+                mDisplay.textContent = mValue.toFixed(2);
+
+                if (v["Speed"]) {
+                  document.getElementById("hi-speed").classList.add("speed-active")
+                  document.getElementById("lo-speed").classList.remove("speed-active")
+                } else {
+                  document.getElementById("hi-speed").classList.remove("speed-active")
+                  document.getElementById("lo-speed").classList.add("speed-active")
+                }
+
+                if (v["AlarmError"]) {
+                  alarmBar.classList.add('alarm-active');
+                  alarmBar.style.backgroundColor = '#DC2626'; // bg-red-600
+                  alarmBar.textContent = "ALARM: E-STOP ACTIVATED";
+                } else if (v["AlarmWarn"]) {
+                  alarmBar.classList.remove('alarm-active');
+                  alarmBar.style.backgroundColor = '#FBBF24'; // bg-yellow-500
+                  alarmBar.textContent = "ALARM ACKNOWLEDGED (E-STOP)";
+                } else {
+                  // On Reset, set alarm back to "OK" state
+                  alarmBar.classList.remove('alarm-active');
+                  alarmBar.style.backgroundColor = '#16A34A'; // bg-green-600
+                  alarmBar.textContent = "SYSTEM OK";
+                }
+            }, 100); // Update every 1.5 seconds
+
+
+            // Add console logs to buttons to show they are working
+            const buttons = document.querySelectorAll('.hmi-button');
+            buttons.forEach(button => {
+                button.addEventListener('click', () => {
+                    console.log(`Button "${button.textContent}" pressed.`);
+                    
+                    // Simple example of button interaction
+                    // Updated to check for "Calibration" instead of "Reset"
+                    if (button.textContent === 'Calibration') {
+                       
+                    }
+
+                    if (button.textContent === 'Zero Distance') {
+                      sendCommand("ZeroDistance")
+                    }
+
+                    if (button.textContent === 'Lo Speed') {
+                      sendCommand("SetSpeed", false)
+                    }
+
+                    if (button.textContent === 'Hi Speed') {
+                      sendCommand("SetSpeed", true)
+                    }
+
+                    if (button.textContent === 'Set Tension') {
+                      window.location.href = '/max-tension';
+                    }
+                });
+            });
+        });
+    </script>
+
+</body>
+</html>
+
