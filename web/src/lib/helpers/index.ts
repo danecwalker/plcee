@@ -52,3 +52,27 @@ export const connectSSE = (onMessage: (data: any) => void, onOpen?: () => void):
     eventSource.close();
   };
 }
+
+export const authenticate = async (password: string) => {
+  const response = await fetch("/auth", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ password }),
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error("Authentication failed");
+  }
+}
+
+export const logout = async () => {
+  const response = await fetch("/auth", {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error("Logout failed");
+  }
+}

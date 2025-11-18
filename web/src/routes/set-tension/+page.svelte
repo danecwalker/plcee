@@ -1,7 +1,7 @@
 <script lang="ts">
   import { beforeNavigate, goto } from "$app/navigation";
   import StatusBar from "$lib/components/StatusBar.svelte";
-  import { cn, connectSSE, requestData, sendCommand } from "$lib/helpers";
+  import { cn, connectSSE, logout, requestData, sendCommand } from "$lib/helpers";
   import { STATUS_OK } from "$lib/types/Status";
   import { error } from "@sveltejs/kit";
   import { onDestroy, onMount } from "svelte";
@@ -47,6 +47,7 @@
       WarnTensionPercent,
       ErrorTensionPercent,
     });
+    await logout();
     goto("/");
   };
 
@@ -226,6 +227,8 @@
     })}
   >
     <button class="btn gprimary" onclick={save}> Set & Save </button>
-    <button class="btn" onclick={() => goto("/")}> Back </button>
+    <button class="btn" onclick={() => 
+      logout().then(() => goto("/"))
+    }> Back </button>
   </footer>
 </div>

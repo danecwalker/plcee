@@ -2,9 +2,6 @@ package main
 
 import (
 	"sync"
-
-	"periph.io/x/conn/v3/gpio"
-	"periph.io/x/devices/v3/ads1x15"
 )
 
 // MaxTensionConfig holds tension warning/error thresholds
@@ -28,9 +25,12 @@ type LogSettingConfig struct {
 
 // Data holds persistent configuration
 type Data struct {
-	TensionSettings MaxTensionConfig `yaml:"tension_settings"`
-	CalTable        CalTableConfig   `yaml:"cal_table"`
-	LogSettings     LogSettingConfig `yaml:"log_settings"`
+	TensionSettings  MaxTensionConfig `yaml:"tension_settings"`
+	CalTable         CalTableConfig   `yaml:"cal_table"`
+	LogSettings      LogSettingConfig `yaml:"log_settings"`
+	DistancePerPulse float64          `yaml:"distance_per_pulse" json:"DistancePerPulse"`
+	AdminPassword    string           `yaml:"admin_password" json:"AdminPassword"`
+	ProtectedRoutes  []string         `yaml:"protected_routes" json:"ProtectedRoutes"`
 }
 
 // State holds the current system state
@@ -60,15 +60,16 @@ type State struct {
 
 // Pins holds GPIO pin references
 type Pins struct {
-	FootSwitch gpio.PinIn
-	EStop      gpio.PinIn
-	ProxInput  gpio.PinIn
+	FootSwitch *GPIOPin
+	EStop      *GPIOPin
+	ProxInput  *GPIOPin
 
-	DumpValve gpio.PinOut
-	Speed     gpio.PinOut
-	Buzz      gpio.PinOut
+	DumpValve *GPIOPin
+	Speed     *GPIOPin
+	Buzz      *GPIOPin
 
-	Load ads1x15.PinADC
+	ADC     *ADS1115
+	ADCChan int
 }
 
 // Command represents a control command
@@ -78,9 +79,10 @@ type Command struct {
 }
 
 var (
-	mu             sync.RWMutex
-	commandQueue   chan Command
-	dataFile       = "data.yaml"
+	mu           sync.RWMutex
+	commandQueue chan Command
+	dataFile     = "/usr/local/bin/data.yaml"
+	// dataFile       = "data.yaml"
 	dataWriteQueue chan *Data
 	dataDirty      bool
 	dataDirtyMutex sync.Mutex

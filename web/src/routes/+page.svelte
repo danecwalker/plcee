@@ -88,7 +88,7 @@
   >
     <button
       class="absolute top-4 right-4 text-gray-500 hover:text-white cursor-pointer text-2xl"
-      onclick={() => goto("/settings")}
+      onclick={() => window.location.href = "/settings"}
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -132,10 +132,10 @@
     <button class="btn" onclick={() => sendCommand("ZeroDistance")}>
       Zero Distance
     </button>
-    <button class="btn" onclick={() => goto("/set-tension")}>
+    <button class="btn" onclick={() => { window.location.href = "/set-tension" }}>
       Set Tension
     </button>
-    <button class="btn" onclick={() => goto("/calibration")}>
+    <button class="btn" onclick={() => window.location.href = "/calibration"}>
       Calibrate
     </button>
     <button

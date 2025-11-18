@@ -92,7 +92,7 @@ func loop(state *State, data *Data) {
 
 	// Detect rising edge
 	if state.ProxInput && !state.PrevProxInput {
-		state.ProxValue += 0.189
+		state.ProxValue += data.DistancePerPulse
 	}
 
 	state.PrevProxInput = state.ProxInput

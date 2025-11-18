@@ -1,0 +1,15 @@
+tension_settings:
+    max_tension_value: 0
+    warn_tension_percent: 0
+    error_tension_percent: 0
+cal_table:
+    cal_points: {}
+log_settings:
+    delay_ms: 1000
+    interval_ms: 1000
+    enabled: false
+distance_per_pulse: 0.189
+admin_password: "123456"
+protected_routes:
+    - "/set-tension"
+    - "/calibration"

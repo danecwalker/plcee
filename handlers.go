@@ -8,14 +8,9 @@ import (
 	"plcee/web"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
-
-var credStore = []string{"secret"}
-var routeLevels = map[string]int{
-	"/":            0,
-	"/max-tension": 0,
-}
 
 func snapshotStreamHandler(pins *Pins, state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -142,9 +137,17 @@ func commandHandler() http.HandlerFunc {
 	}
 }
 
-func authHandler() http.HandlerFunc {
+func authHandler(data *Data) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
+		if r.Method == http.MethodDelete {
+			http.SetCookie(w, &http.Cookie{
+				Name:   "session",
+				Value:  "",
+				MaxAge: -1,
+			})
+			w.WriteHeader(http.StatusOK)
+			return
+		} else if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -160,7 +163,7 @@ func authHandler() http.HandlerFunc {
 		}
 
 		// Simple password check (in a real application, use secure methods)
-		if slices.Contains(credStore, creds.Password) {
+		if data.AdminPassword == creds.Password {
 			log.Println("authentication successful")
 			// add session cookie
 			http.SetCookie(w, &http.Cookie{
@@ -181,18 +184,52 @@ func authHandler() http.HandlerFunc {
 	}
 }
 
-func rootHandler() http.HandlerFunc {
+func rootHandler(data *Data) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		level, ok := routeLevels[r.URL.Path]
-		if ok && level > 0 {
+		// Check if there's a hardware error and redirect to error page
+		// unless we're already on the error page or API endpoint
+		// if hardwareError != nil && r.URL.Path != "/error" && r.URL.Path != "/api/hardware-error" {
+		// 	http.Redirect(w, r, "/error", http.StatusSeeOther)
+		// 	return
+		// }
+
+		if slices.Contains(data.ProtectedRoutes, r.URL.Path) {
 			cookie, err := r.Cookie("session")
 			if err != nil || cookie.Value != "authenticated" {
 				log.Printf("unauthorized access attempt to: %s", r.URL.Path)
-				http.Redirect(w, r, "/", http.StatusSeeOther)
+				http.Redirect(w, r, "/login?redirect="+r.URL.Path, http.StatusSeeOther)
 				return
+			}
+		} else {
+			if len(strings.Split(r.URL.Path, ".")) <= 1 {
+				http.SetCookie(w, &http.Cookie{
+					Name:   "session",
+					Value:  "",
+					MaxAge: -1,
+				})
 			}
 		}
 
 		web.SvelteKitHandler("/").ServeHTTP(w, r)
+	}
+}
+
+func hardwareErrorAPIHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		errorMessage := "Unknown hardware error"
+		if hardwareError != nil {
+			errorMessage = hardwareError.Error()
+		}
+
+		response := map[string]string{
+			"error": errorMessage,
+		}
+
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("error encoding hardware error response: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
 	}
 }
