@@ -63,6 +63,11 @@
       let alarm_warn = m["AlarmWarn"];
       let max_tension = m["MaxTension"];
       let e_stop = m["EStop"];
+      let usb_connected = m["UsbConnected"];
+      let usb_error = m["UsbError"];
+      let log_enabled = m["LogEnabled"];
+      let device_log_error = m["DeviceLogError"];
+      let control_loop_error = m["ControlLoopError"];
 
       if (e_stop) {
         status = {
@@ -85,6 +90,21 @@
         status = {
           level: 1,
           message: `WARNING: High Load Approaching Maximum Tension`,
+        };
+      } else if (control_loop_error) {
+        status = {
+          level: 2,
+          message: `ERROR: ${control_loop_error}`,
+        };
+      } else if (log_enabled && device_log_error) {
+        status = {
+          level: 2,
+          message: `ERROR: ${device_log_error}`,
+        };
+      } else if (log_enabled && (usb_error || !usb_connected)) {
+        status = {
+          level: 2,
+          message: usb_error ? `ERROR: ${usb_error}` : "ERROR: USB not connected",
         };
       } else {
         status = {

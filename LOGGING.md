@@ -21,14 +21,8 @@ The logging system runs as a background worker that saves sensor data to CSV fil
 Send these commands to the `/command` endpoint:
 
 ```json
-// Enable/disable logging
-{"Name": "SetLogEnabled", "Data": true}
-
-// Set log interval (milliseconds)
-{"Name": "SetLogInterval", "Data": 100}
-
-// Set session timeout (milliseconds)
-{"Name": "SetLogDelay", "Data": 5000}
+// Update all logging settings in one command
+{"Name": "SetLogSettings", "Data": {"LogDelayMs": 5000, "IntervalMs": 1000, "Enabled": true}}
 ```
 
 ## How It Works
@@ -42,8 +36,25 @@ Send these commands to the `/command` endpoint:
 
 ## USB Drive Setup
 
-1. Mount your USB drive to `/media/usb` (or update `usbMountPath` in `logging.go`)
-2. The system will automatically create files named `recording_1.csv`, `recording_2.csv`, etc.
+1. Mount your USB drive to `/mnt/usb`
+2. The app writes logs under `/mnt/usb/data`
+3. The system automatically creates files named `recording_YYYY-MM-DD_HHMMSS.csv`
+
+## Device Logs
+
+- The app also stores recordings locally under `/var/log/delphi`
+- Download all local logs as a zip from:
+  - `GET /logs/device/download`
+  - Requires authenticated session cookie (`/auth` login)
+
+## Logging Health Endpoint
+
+- `GET /health/logging` returns live logging diagnostics (no auth required):
+  - overall status (`ok`, `degraded`, `error`)
+  - USB state (`connected`, `mounted`, `healthy`, `error`)
+  - local device log health (`healthy`, `error`)
+  - logging queue depth/capacity/utilization
+  - control loop fault state (`controlLoop.error`)
 
 ## CSV Format
 

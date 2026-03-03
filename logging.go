@@ -1,15 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"encoding/csv"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
-// LogEntry represents a single log entry to be written
+// LogEntry represents a single log entry to be written.
 type LogEntry struct {
 	Timestamp  time.Time
 	Load       float64
@@ -21,37 +23,217 @@ type LogEntry struct {
 	MaxTension bool
 }
 
-// LogCommand represents a logging control command
+// LogCommand represents a logging control command.
 type LogCommand struct {
-	Action     string // "log", "start", "stop"
-	FootSwitch bool
-	Entry      LogEntry
+	Action string // "log", "start", "stop"
+	Entry  LogEntry
 }
 
 var (
-	logQueue     chan LogCommand
-	usbMountPath = "/mnt/usb/data" // Common USB mount point, adjust as needed
+	logQueue chan LogCommand
 )
 
-// checkUsbConnected checks if USB drive is mounted
+const (
+	usbMountPoint = "/mnt/usb"
+	usbLogSubdir  = "data"
+	deviceLogDir  = "/var/log/delphi"
+)
+
+var csvHeader = []string{"Timestamp", "Load", "ProxValue", "DumpValve", "Speed", "AlarmError", "AlarmWarn", "MaxTension"}
+
+// checkUsbConnected checks if USB drive is mounted.
 func checkUsbConnected() bool {
-	info, err := os.Stat(usbMountPath)
+	return isMountPoint(usbMountPoint)
+}
+
+func resolveUSBLogDir() (string, error) {
+	if !checkUsbConnected() {
+		return "", fmt.Errorf("USB not mounted")
+	}
+
+	logDir := filepath.Join(usbMountPoint, usbLogSubdir)
+	if err := ensureWritableDir(logDir, "USB data directory"); err != nil {
+		return "", err
+	}
+
+	return logDir, nil
+}
+
+func resolveDeviceLogDir() (string, error) {
+	if err := ensureWritableDir(deviceLogDir, "device log directory"); err != nil {
+		return "", err
+	}
+	return deviceLogDir, nil
+}
+
+func ensureWritableDir(dirPath string, label string) error {
+	if err := os.MkdirAll(dirPath, 0o755); err != nil {
+		return fmt.Errorf("failed to prepare %s: %w", label, err)
+	}
+
+	probePath := filepath.Join(dirPath, ".delphi-write-probe")
+	probeFile, err := os.OpenFile(probePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return fmt.Errorf("%s is not writable: %w", label, err)
+	}
+	if err := probeFile.Close(); err != nil {
+		return fmt.Errorf("failed to close probe file for %s: %w", label, err)
+	}
+	_ = os.Remove(probePath)
+
+	return nil
+}
+
+func isMountPoint(target string) bool {
+	f, err := os.Open("/proc/self/mountinfo")
 	if err != nil {
 		return false
 	}
-	return info.IsDir()
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 5 {
+			continue
+		}
+
+		mountPoint := strings.NewReplacer(
+			"\\040", " ",
+			"\\011", "\t",
+			"\\012", "\n",
+			"\\134", "\\",
+		).Replace(fields[4])
+
+		if mountPoint == target {
+			return true
+		}
+	}
+
+	return scanner.Err() == nil
 }
 
-// startLogger starts the background logging worker
+func openRecordingFile(logDir string, sessionID string) (*os.File, *csv.Writer, string, error) {
+	filename := filepath.Join(logDir, fmt.Sprintf("recording_%s.csv", sessionID))
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, nil, "", err
+	}
+
+	writer := csv.NewWriter(file)
+
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, nil, "", err
+	}
+	if info.Size() == 0 {
+		if err := writer.Write(csvHeader); err != nil {
+			file.Close()
+			return nil, nil, "", err
+		}
+		writer.Flush()
+		if err := writer.Error(); err != nil {
+			file.Close()
+			return nil, nil, "", err
+		}
+	}
+
+	return file, writer, filename, nil
+}
+
+// startLogger starts the background logging worker.
 func startLogger(state *State, data *Data) {
 	logQueue = make(chan LogCommand, 100)
 
 	go func() {
-		var currentFile *os.File
-		var csvWriter *csv.Writer
+		var usbFile *os.File
+		var usbWriter *csv.Writer
+		var deviceFile *os.File
+		var deviceWriter *csv.Writer
+		var currentSessionID string
 		var lastStopTime time.Time
 		var isLogging bool
 		var hasEverStopped bool
+
+		closeSink := func(file **os.File, writer **csv.Writer) {
+			if *writer != nil {
+				(*writer).Flush()
+			}
+			if *file != nil {
+				_ = (*file).Close()
+			}
+			*file = nil
+			*writer = nil
+		}
+
+		closeAllSinks := func() {
+			closeSink(&usbFile, &usbWriter)
+			closeSink(&deviceFile, &deviceWriter)
+		}
+
+		setUSBStatus := func(connected bool, usbErr string) {
+			mu.Lock()
+			state.UsbConnected = connected
+			state.UsbError = usbErr
+			mu.Unlock()
+		}
+
+		setDeviceLogError := func(deviceErr string) {
+			mu.Lock()
+			state.DeviceLogError = deviceErr
+			mu.Unlock()
+		}
+
+		openDeviceSink := func() {
+			if deviceWriter != nil || currentSessionID == "" {
+				return
+			}
+
+			logDir, err := resolveDeviceLogDir()
+			if err != nil {
+				setDeviceLogError(err.Error())
+				log.Printf("device logging unavailable: %v", err)
+				return
+			}
+
+			file, writer, filename, err := openRecordingFile(logDir, currentSessionID)
+			if err != nil {
+				setDeviceLogError("device log write failed")
+				log.Printf("error opening device log file: %v", err)
+				return
+			}
+
+			deviceFile = file
+			deviceWriter = writer
+			setDeviceLogError("")
+			log.Printf("device recording active: %s", filename)
+		}
+
+		openUSBSink := func() {
+			if usbWriter != nil || currentSessionID == "" {
+				return
+			}
+
+			logDir, err := resolveUSBLogDir()
+			if err != nil {
+				setUSBStatus(false, err.Error())
+				log.Printf("USB unavailable, continuing with device-only logging: %v", err)
+				return
+			}
+
+			file, writer, filename, err := openRecordingFile(logDir, currentSessionID)
+			if err != nil {
+				setUSBStatus(false, "USB write failed")
+				log.Printf("error opening USB log file: %v", err)
+				return
+			}
+
+			usbFile = file
+			usbWriter = writer
+			setUSBStatus(true, "")
+			log.Printf("USB recording active: %s", filename)
+		}
 
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
@@ -61,105 +243,105 @@ func startLogger(state *State, data *Data) {
 			case cmd := <-logQueue:
 				switch cmd.Action {
 				case "start":
-					// FootSwitch turned on
 					now := time.Now()
 					timeSinceStop := now.Sub(lastStopTime)
 
-					// Read current delay setting
+					mu.RLock()
 					currentDelayMs := data.LogSettings.LogDelayMs
+					mu.RUnlock()
 
-					// Check if we should start a new recording or continue existing one
-					// Create new file if: never stopped before OR time since stop exceeds delay
-					if !hasEverStopped || timeSinceStop > time.Duration(currentDelayMs)*time.Millisecond {
-						// Close previous file if open
-						if currentFile != nil {
-							csvWriter.Flush()
-							currentFile.Close()
-							currentFile = nil
-							csvWriter = nil
-						}
-
-						// Start new recording if USB is connected
-						if checkUsbConnected() {
-							// Use timestamp for filename: recording_2025-11-05_143022.csv
-							timestamp := now.Format("2006-01-02_150405")
-							filename := filepath.Join(usbMountPath, fmt.Sprintf("recording_%s.csv", timestamp))
-							file, err := os.Create(filename)
-							if err != nil {
-								log.Printf("error creating log file: %v", err)
-								mu.Lock()
-								state.UsbConnected = false
-								mu.Unlock()
-								break
-							}
-
-							currentFile = file
-							csvWriter = csv.NewWriter(file)
-
-							// Write header
-							header := []string{"Timestamp", "Load", "ProxValue", "DumpValve", "Speed", "AlarmError", "AlarmWarn", "MaxTension"}
-							if err := csvWriter.Write(header); err != nil {
-								log.Printf("error writing CSV header: %v", err)
-							}
-							csvWriter.Flush()
-
-							log.Printf("started new recording: %s (delay was %dms, time since stop: %v)", filename, currentDelayMs, timeSinceStop)
-							mu.Lock()
-							state.UsbConnected = true
-							mu.Unlock()
-						} else {
-							log.Println("USB not connected, cannot start logging")
-							mu.Lock()
-							state.UsbConnected = false
-							mu.Unlock()
-						}
+					if currentSessionID == "" || !hasEverStopped || timeSinceStop > time.Duration(currentDelayMs)*time.Millisecond {
+						closeAllSinks()
+						currentSessionID = now.Format("2006-01-02_150405")
 					} else {
 						log.Printf("continuing existing recording (time since stop: %v, delay: %dms)", timeSinceStop, currentDelayMs)
 					}
-					isLogging = true
+
+					openDeviceSink()
+					openUSBSink()
+					isLogging = deviceWriter != nil || usbWriter != nil
 
 				case "stop":
-					// FootSwitch turned off
 					isLogging = false
 					lastStopTime = time.Now()
 					hasEverStopped = true
 
 				case "log":
-					// Write log entry
-					if isLogging && currentFile != nil && csvWriter != nil {
-						entry := cmd.Entry
-						record := []string{
-							entry.Timestamp.Format(time.RFC3339Nano),
-							fmt.Sprintf("%.3f", entry.Load),
-							fmt.Sprintf("%.3f", entry.ProxValue),
-							fmt.Sprintf("%t", entry.DumpValve),
-							fmt.Sprintf("%t", entry.Speed),
-							fmt.Sprintf("%t", entry.AlarmError),
-							fmt.Sprintf("%t", entry.AlarmWarn),
-							fmt.Sprintf("%t", entry.MaxTension),
-						}
-						if err := csvWriter.Write(record); err != nil {
-							log.Printf("error writing CSV record: %v", err)
-						}
-						csvWriter.Flush()
+					if !isLogging {
+						continue
 					}
+
+					entry := cmd.Entry
+					record := []string{
+						entry.Timestamp.Format(time.RFC3339Nano),
+						fmt.Sprintf("%.3f", entry.Load),
+						fmt.Sprintf("%.3f", entry.ProxValue),
+						fmt.Sprintf("%t", entry.DumpValve),
+						fmt.Sprintf("%t", entry.Speed),
+						fmt.Sprintf("%t", entry.AlarmError),
+						fmt.Sprintf("%t", entry.AlarmWarn),
+						fmt.Sprintf("%t", entry.MaxTension),
+					}
+
+					if deviceWriter != nil {
+						if err := deviceWriter.Write(record); err != nil {
+							log.Printf("error writing device CSV record: %v", err)
+							setDeviceLogError("device log write failed")
+							closeSink(&deviceFile, &deviceWriter)
+						} else {
+							deviceWriter.Flush()
+							if err := deviceWriter.Error(); err != nil {
+								log.Printf("error flushing device CSV record: %v", err)
+								setDeviceLogError("device log write failed")
+								closeSink(&deviceFile, &deviceWriter)
+							}
+						}
+					}
+
+					if usbWriter != nil {
+						if err := usbWriter.Write(record); err != nil {
+							log.Printf("error writing USB CSV record: %v", err)
+							setUSBStatus(false, "USB write failed")
+							closeSink(&usbFile, &usbWriter)
+						} else {
+							usbWriter.Flush()
+							if err := usbWriter.Error(); err != nil {
+								log.Printf("error flushing USB CSV record: %v", err)
+								setUSBStatus(false, "USB write failed")
+								closeSink(&usbFile, &usbWriter)
+							}
+						}
+					}
+
+					isLogging = deviceWriter != nil || usbWriter != nil
 				}
 
 			case <-ticker.C:
-				// Periodic check for USB connection status
 				connected := checkUsbConnected()
-				mu.Lock()
-				state.UsbConnected = connected
-				mu.Unlock()
+				if !connected {
+					setUSBStatus(false, "USB not connected")
+				} else {
+					mu.Lock()
+					state.UsbConnected = true
+					if state.UsbError == "USB not connected" {
+						state.UsbError = ""
+					}
+					mu.Unlock()
+				}
 
-				if !connected && currentFile != nil {
-					// USB was disconnected, close file
-					csvWriter.Flush()
-					currentFile.Close()
-					currentFile = nil
-					csvWriter = nil
-					isLogging = false
-					log.Println("USB disconnected, stopped logging")
+				if !connected && usbFile != nil {
+					closeSink(&usbFile, &usbWriter)
+					log.Println("USB disconnected, USB logging stopped")
+				}
+
+				if isLogging && currentSessionID != "" {
+					if deviceWriter == nil {
+						openDeviceSink()
+					}
+					if connected && usbWriter == nil {
+						openUSBSink()
+					}
+					isLogging = deviceWriter != nil || usbWriter != nil
 				}
 			}
 		}
@@ -168,9 +350,9 @@ func startLogger(state *State, data *Data) {
 	log.Println("logging worker started")
 }
 
-// queueLogEntry sends a log entry to the logging queue (call from main loop)
+// queueLogEntry sends a log entry to the logging queue (call from main loop).
 func queueLogEntry(state *State) {
-	// Non-blocking send to avoid allocations/delays in main loop
+	mu.RLock()
 	entry := LogEntry{
 		Timestamp:  time.Now(),
 		Load:       state.Load,
@@ -181,15 +363,16 @@ func queueLogEntry(state *State) {
 		AlarmWarn:  state.AlarmWarn,
 		MaxTension: state.MaxTension,
 	}
+	mu.RUnlock()
 
 	select {
 	case logQueue <- LogCommand{Action: "log", Entry: entry}:
 	default:
-		// Queue full, drop this entry
+		// Queue full; drop this entry to keep control loop real-time.
 	}
 }
 
-// queueLogStart signals that logging should start/continue
+// queueLogStart signals that logging should start/continue.
 func queueLogStart() {
 	select {
 	case logQueue <- LogCommand{Action: "start"}:
@@ -197,7 +380,7 @@ func queueLogStart() {
 	}
 }
 
-// queueLogStop signals that logging should pause
+// queueLogStop signals that logging should pause.
 func queueLogStop() {
 	select {
 	case logQueue <- LogCommand{Action: "stop"}:

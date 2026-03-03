@@ -1,4 +1,4 @@
-# GPIO Configuration for PLCEE on Raspberry Pi CM5
+# GPIO Configuration for DELPHI on Raspberry Pi CM5
 
 ## Overview
 
@@ -90,7 +90,7 @@ Some CM5 boards may use GPIO 13 for specific functions. Common alternatives:
 ### Issue: Running without root
 GPIO sysfs access requires root permissions. Run with:
 ```bash
-sudo ./plcee
+sudo ./delphi
 ```
 
 ### Issue: GPIO already exported by kernel
@@ -105,7 +105,7 @@ Once configured, test that GPIO access works:
 
 ```bash
 # Run with verbose output
-./plcee 2>&1 | grep -i gpio
+./delphi 2>&1 | grep -i gpio
 ```
 
 You should see:

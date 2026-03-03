@@ -18,7 +18,7 @@ This means GPIO 13 doesn't exist on your CM5.
 The application now **automatically detects available GPIO pins on CM5**. Simply run:
 
 ```bash
-sudo ./plcee
+sudo ./delphi
 ```
 
 The app will:
@@ -113,7 +113,7 @@ gpio_pins:
 
 ### "Permission denied" errors
 ```bash
-sudo ./plcee
+sudo ./delphi
 ```
 
 ### GPIO still not exporting

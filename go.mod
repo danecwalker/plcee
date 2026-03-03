@@ -1,4 +1,4 @@
-module plcee
+module delphi
 
 go 1.24.2
 

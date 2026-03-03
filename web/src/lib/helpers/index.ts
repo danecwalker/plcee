@@ -31,23 +31,37 @@ export const sendCommand = async (command: string, value: any = null) => {
     },
     body: JSON.stringify({ Name: command, Data: value }),
   });
-  if (!response.ok) {
-    throw new Error("Failed to send command");
+
+  const bodyText = await response.text();
+  let body: any = null;
+  if (bodyText) {
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      body = null;
+    }
   }
+
+  if (!response.ok) {
+    const message = body?.error || bodyText || "Failed to send command";
+    throw new Error(message);
+  }
+
+  return body;
 }
 
 export const connectSSE = (onMessage: (data: any) => void, onOpen?: () => void): (() => void) => {
   const eventSource = new EventSource(`${import.meta.env.DEV ? "http://iriv.local:8080" : ""}/snapshot/stream?t=100`);
-  
+
   eventSource.onmessage = (event) => {
     const data = JSON.parse(event.data);
     onMessage(data);
   };
-  
+
   eventSource.onopen = () => {
     if (onOpen) onOpen();
   };
-  
+
   return () => {
     eventSource.close();
   };

@@ -3,8 +3,12 @@
   import StatusBar from "$lib/components/StatusBar.svelte";
   import { cn, connectSSE, requestData, sendCommand } from "$lib/helpers";
   import { STATUS_OK } from "$lib/types/Status";
-  import { error } from "@sveltejs/kit";
   import { onDestroy, onMount } from "svelte";
+
+  const MIN_LOG_DELAY_MS = 0;
+  const MAX_LOG_DELAY_MS = 3600000;
+  const MIN_LOG_INTERVAL_MS = 10;
+  const MAX_LOG_INTERVAL_MS = 60000;
 
   let status = $state(STATUS_OK);
 
@@ -13,15 +17,14 @@
   let logEnabled = $state(false);
   let sseCleanup: (() => void) | null = null;
 
-  let selectedField: "logDelayMs" | "logIntervalMs" | "logEnabled" =
-    $state("logDelayMs");
+  let selectedField: "logDelayMs" | "logIntervalMs" = $state("logDelayMs");
 
-  const updateField = (value: number | ".") => {
+  const updateField = (value: number) => {
     if (selectedField === "logDelayMs") {
       logDelayMs = `${logDelayMs}${value}`;
     } else if (selectedField === "logIntervalMs") {
       logIntervalMs = `${logIntervalMs}${value}`;
-    } 
+    }
   };
 
   const clearField = () => {
@@ -29,20 +32,100 @@
       logDelayMs = "";
     } else if (selectedField === "logIntervalMs") {
       logIntervalMs = "";
-    } 
+    }
+  };
+
+  const setStatusFromSnapshot = (m: any) => {
+    let alarm_err = m["AlarmError"];
+    let alarm_warn = m["AlarmWarn"];
+    let max_tension = m["MaxTension"];
+    let e_stop = m["EStop"];
+    let usb_connected = m["UsbConnected"];
+    let usb_error = m["UsbError"];
+    let device_log_error = m["DeviceLogError"];
+    let control_loop_error = m["ControlLoopError"];
+    let log_enabled = m["LogEnabled"];
+
+    if (e_stop) {
+      status = {
+        level: 2,
+        message: "ERROR: STOP ENGAGED",
+      };
+    } else if (alarm_err) {
+      if (max_tension === true) {
+        status = {
+          level: 2,
+          message: `ERROR: Load Exceeds Maximum Tension`,
+        };
+      } else {
+        status = {
+          level: 2,
+          message: `ERROR: Overload Exceeded`,
+        };
+      }
+    } else if (alarm_warn) {
+      status = {
+        level: 1,
+        message: `WARNING: High Load Approaching Maximum Tension`,
+      };
+    } else if (control_loop_error) {
+      status = {
+        level: 2,
+        message: `ERROR: ${control_loop_error}`,
+      };
+    } else if (log_enabled && device_log_error) {
+      status = {
+        level: 2,
+        message: `ERROR: ${device_log_error}`,
+      };
+    } else if (log_enabled && (usb_error || !usb_connected)) {
+      status = {
+        level: 2,
+        message: usb_error ? `ERROR: ${usb_error}` : "ERROR: USB not connected",
+      };
+    } else {
+      status = {
+        level: 0,
+        message: "System OK",
+      };
+    }
   };
 
   const save = async () => {
-    // parse to floats
-    const LogDelayMs = parseInt(logDelayMs);
-    const IntervalMs = parseFloat(logIntervalMs);
+    const LogDelayMs = parseInt(logDelayMs || "0", 10);
+    const IntervalMs = parseInt(logIntervalMs || "0", 10);
     const Enabled = logEnabled;
-    // Save the tension settings to backend or local storage
-    await sendCommand("SetLogSettings", {
-      LogDelayMs,
-      IntervalMs,
-      Enabled,
-    });
+
+    if (!Number.isInteger(LogDelayMs) || LogDelayMs < MIN_LOG_DELAY_MS || LogDelayMs > MAX_LOG_DELAY_MS) {
+      status = {
+        level: 2,
+        message: `ERROR: Log Delay must be ${MIN_LOG_DELAY_MS}-${MAX_LOG_DELAY_MS} ms`,
+      };
+      return;
+    }
+
+    if (!Number.isInteger(IntervalMs) || IntervalMs < MIN_LOG_INTERVAL_MS || IntervalMs > MAX_LOG_INTERVAL_MS) {
+      status = {
+        level: 2,
+        message: `ERROR: Log Interval must be ${MIN_LOG_INTERVAL_MS}-${MAX_LOG_INTERVAL_MS} ms`,
+      };
+      return;
+    }
+
+    try {
+      await sendCommand("SetLogSettings", {
+        LogDelayMs,
+        IntervalMs,
+        Enabled,
+      });
+    } catch (err) {
+      status = {
+        level: 2,
+        message: `ERROR: ${(err as Error).message}`,
+      };
+      return;
+    }
+
     goto("/");
   };
 
@@ -54,39 +137,7 @@
     });
 
     sseCleanup = connectSSE((m) => {
-      let alarm_err = m["AlarmError"];
-      let alarm_warn = m["AlarmWarn"];
-      let max_tension = m["logDelayMs"];
-      let e_stop = m["EStop"];
-
-      if (e_stop) {
-        status = {
-          level: 2,
-          message: "ERROR: STOP ENGAGED",
-        };
-      } else if (alarm_err) {
-        if (max_tension === true) {
-          status = {
-            level: 2,
-            message: `ERROR: Load Exceeds Maximum Tension`,
-          };
-        } else {
-          status = {
-            level: 2,
-            message: `ERROR: Overload Exceeded`,
-          };
-        }
-      } else if (alarm_warn) {
-        status = {
-          level: 1,
-          message: `WARNING: High Load Approaching Maximum Tension`,
-        };
-      } else {
-        status = {
-          level: 0,
-          message: "System OK",
-        };
-      }
+      setStatusFromSnapshot(m);
     });
   });
 
@@ -185,7 +236,7 @@
       <button class="btn text-xl" onclick={() => updateField(9)}>9</button>
       <button class="btn text-xl" onclick={() => clearField()}>C</button>
       <button class="btn text-xl" onclick={() => updateField(0)}>0</button>
-      <button class="btn text-xl" onclick={() => updateField(".")}>.</button>
+      <div class="btn text-xl opacity-60 cursor-not-allowed">.</div>
     </div>
   </main>
 

@@ -40,7 +40,7 @@ func CalFromRaw(data *CalTableConfig, rawValue float64) float64 {
 	// Helper function to safely interpolate
 	safeInterp := func(k1, k2, r1, r2, raw float64) float64 {
 		if r2 == r1 {
-			return k1 // avoid division by zero — just return one of the known keys
+			return k1 // avoid division by zero; return one of the known keys
 		}
 		val := k1 + (k2-k1)*(raw-r1)/(r2-r1)
 		if math.IsInf(val, 0) || math.IsNaN(val) {
@@ -76,45 +76,48 @@ func CalFromRaw(data *CalTableConfig, rawValue float64) float64 {
 	return rawValue
 }
 
-// loop processes state updates based on calibration and alarm thresholds
+// loop processes state updates based on calibration and alarm thresholds.
 func loop(state *State, data *Data) {
-	// Read data config with lock to avoid concurrent map iteration
 	mu.RLock()
 	tensionSettings := data.TensionSettings
-	hasCalPoints := len(data.CalTable.CalPoints) > 0
+	distancePerPulse := data.DistancePerPulse
+
+	calPoints := make(map[string]string, len(data.CalTable.CalPoints))
+	for k, v := range data.CalTable.CalPoints {
+		calPoints[k] = v
+	}
+
+	currentLoad := state.Load
+	proxInput := state.ProxInput
+	prevProxInput := state.PrevProxInput
+	proxValue := state.ProxValue
+	footSwitch := state.FootSwitch
+	eStop := state.EStop
 	mu.RUnlock()
 
-	if hasCalPoints {
-		mu.RLock()
-		state.Load = CalFromRaw(&data.CalTable, state.Load)
-		mu.RUnlock()
+	if len(calPoints) > 0 {
+		currentLoad = CalFromRaw(&CalTableConfig{CalPoints: calPoints}, currentLoad)
 	}
 
 	// Detect rising edge
-	if state.ProxInput && !state.PrevProxInput {
-		state.ProxValue += data.DistancePerPulse
+	if proxInput && !prevProxInput {
+		proxValue += distancePerPulse
 	}
 
-	state.PrevProxInput = state.ProxInput
+	alarmWarn := currentLoad >= tensionSettings.MaxTensionValue*tensionSettings.WarnTensionPercent/100
+	alarmError := currentLoad >= tensionSettings.MaxTensionValue*tensionSettings.ErrorTensionPercent/100
+	maxTension := currentLoad >= tensionSettings.MaxTensionValue
 
-	if state.Load >= tensionSettings.MaxTensionValue*tensionSettings.WarnTensionPercent/100 {
-		state.AlarmWarn = true
-	} else {
-		state.AlarmWarn = false
-	}
+	alarmError = alarmError || maxTension || eStop
+	dumpValve := footSwitch && !maxTension && !eStop
 
-	if state.Load >= tensionSettings.MaxTensionValue*tensionSettings.ErrorTensionPercent/100 {
-		state.AlarmError = true
-	} else {
-		state.AlarmError = false
-	}
-
-	if state.Load >= tensionSettings.MaxTensionValue {
-		state.MaxTension = true
-	} else {
-		state.MaxTension = false
-	}
-
-	state.AlarmError = state.AlarmError || state.MaxTension || state.EStop
-	state.DumpValve = state.FootSwitch && !state.MaxTension && !state.EStop
+	mu.Lock()
+	state.Load = currentLoad
+	state.ProxValue = proxValue
+	state.PrevProxInput = proxInput
+	state.AlarmWarn = alarmWarn
+	state.AlarmError = alarmError
+	state.MaxTension = maxTension
+	state.DumpValve = dumpValve
+	mu.Unlock()
 }

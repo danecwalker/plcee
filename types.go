@@ -48,7 +48,12 @@ type State struct {
 	// Analog
 	Load float64
 
-	UsbConnected bool
+	UsbConnected   bool
+	UsbError       string
+	DeviceLogError string
+	LogEnabled     bool
+
+	ControlLoopError string
 
 	// Memory
 	Buzz       bool
@@ -74,8 +79,15 @@ type Pins struct {
 
 // Command represents a control command
 type Command struct {
-	Name string
-	Data any
+	Name   string
+	Data   any
+	Result chan CommandResult `json:"-"`
+}
+
+// CommandResult carries command execution status back to HTTP handlers.
+type CommandResult struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
 }
 
 var (

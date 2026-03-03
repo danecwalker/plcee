@@ -11,8 +11,28 @@ import (
 
 var writeFileMutex sync.Mutex
 
-// startDataWriter starts a background worker that debounces and batches writes to disk
-// This avoids excessive I/O operations during rapid updates
+func snapshotPersistentData(data *Data) Data {
+	mu.RLock()
+	defer mu.RUnlock()
+
+	copyData := Data{
+		TensionSettings:  data.TensionSettings,
+		CalTable:         CalTableConfig{CalPoints: make(map[string]string, len(data.CalTable.CalPoints))},
+		LogSettings:      data.LogSettings,
+		DistancePerPulse: data.DistancePerPulse,
+		AdminPassword:    data.AdminPassword,
+		ProtectedRoutes:  append([]string(nil), data.ProtectedRoutes...),
+	}
+
+	for k, v := range data.CalTable.CalPoints {
+		copyData.CalTable.CalPoints[k] = v
+	}
+
+	return copyData
+}
+
+// startDataWriter starts a background worker that debounces and batches writes to disk.
+// This avoids excessive I/O operations during rapid updates.
 func startDataWriter(data *Data) {
 	const debounceDelay = 2 * time.Second
 	var debounceTimer *time.Timer
@@ -23,31 +43,32 @@ func startDataWriter(data *Data) {
 	for {
 		select {
 		case dataToWrite := <-dataWriteQueue:
-			// Immediate write requested (bypass debounce)
+			// Immediate write requested (bypass debounce).
 			if err := writeDataFile(dataToWrite); err != nil {
 				log.Printf("error writing data file (immediate): %v", err)
 			} else {
 				log.Println("data file written successfully (immediate)")
 			}
-			// Clear dirty flag since we just wrote
+
+			// Clear dirty flag since we just wrote.
 			dataDirtyMutex.Lock()
 			dataDirty = false
 			dataDirtyMutex.Unlock()
 
-			// Cancel any pending debounced write
+			// Cancel any pending debounced write.
 			if debounceTimer != nil {
 				debounceTimer.Stop()
 				timerActive = false
 			}
 
 		default:
-			// Check if data is dirty and needs debounced write
+			// Check if data is dirty and needs debounced write.
 			dataDirtyMutex.Lock()
 			isDirty := dataDirty
 			dataDirtyMutex.Unlock()
 
 			if isDirty && !timerActive {
-				// Start the debounce timer only if not already active
+				// Start the debounce timer only if not already active.
 				log.Println("starting new debounce timer (2 seconds)")
 				timerActive = true
 				debounceTimer = time.AfterFunc(debounceDelay, func() {
@@ -58,7 +79,6 @@ func startDataWriter(data *Data) {
 						dataDirtyMutex.Unlock()
 
 						log.Println("writing data file (debounced)")
-						// Write to file
 						if err := writeDataFile(data); err != nil {
 							log.Printf("error writing data file: %v", err)
 						} else {
@@ -72,17 +92,18 @@ func startDataWriter(data *Data) {
 				})
 			}
 
-			// Small sleep to avoid busy loop
+			// Small sleep to avoid busy loop.
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
 
-// writeDataFile writes the data to the YAML file
+// writeDataFile writes a lock-safe snapshot of data to YAML.
 func writeDataFile(data *Data) error {
-	// Prevent concurrent file writes
 	writeFileMutex.Lock()
 	defer writeFileMutex.Unlock()
+
+	snapshot := snapshotPersistentData(data)
 
 	f, err := os.Create(dataFile)
 	if err != nil {
@@ -91,16 +112,14 @@ func writeDataFile(data *Data) error {
 	defer f.Close()
 
 	encoder := yaml.NewEncoder(f)
-	if err := encoder.Encode(data); err != nil {
+	if err := encoder.Encode(&snapshot); err != nil {
 		return err
 	}
 
-	// Explicitly close the encoder to flush buffers
 	if err := encoder.Close(); err != nil {
 		return err
 	}
 
-	// Sync to ensure data is written to disk
 	if err := f.Sync(); err != nil {
 		return err
 	}
@@ -108,7 +127,7 @@ func writeDataFile(data *Data) error {
 	return nil
 }
 
-// markDataDirty marks that the data has been modified and needs to be written
+// markDataDirty marks that the data has been modified and needs to be written.
 func markDataDirty() {
 	dataDirtyMutex.Lock()
 	dataDirty = true
@@ -116,7 +135,7 @@ func markDataDirty() {
 	log.Println("data marked dirty - will write in 2 seconds")
 }
 
-// requestImmediateWrite requests an immediate write of the data to disk
+// requestImmediateWrite requests an immediate write of the data to disk.
 func requestImmediateWrite(data *Data) {
 	select {
 	case dataWriteQueue <- data:

@@ -2,16 +2,34 @@ package main
 
 import (
 	_ "embed"
+	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 var hardwareError error
+
+func forceMachineSafeState(state *State, pins *Pins, reason string) {
+	log.Printf("forcing safe machine state: %s", reason)
+
+	mu.Lock()
+	state.DumpValve = false
+	state.Speed = false
+	state.Buzz = false
+	state.ControlLoopError = reason
+	mu.Unlock()
+
+	if pins != nil {
+		state.write(pins)
+	}
+}
 
 func main() {
 	// Command-line flags
@@ -20,7 +38,7 @@ func main() {
 	distance := flag.Float64("distance", 0.189, "Distance per pulse in meters (default: 0.189m for standard setup)")
 	flag.Parse()
 
-	log.Println("starting PLCEE application...")
+	log.Println("starting DELPHI application...")
 	log.Printf("I2C bus: %q", *busName)
 	log.Printf("GPIO base: %d", *gpioBase)
 
@@ -114,7 +132,7 @@ func main() {
 		// Ensure cleanup on exit
 		defer closePins(pins)
 
-		var state State = State{
+		var state = State{
 			DumpValve: false,
 			Speed:     false,
 
@@ -142,17 +160,38 @@ func main() {
 		// Application logic using state...
 		log.Println("starting main control loop")
 		go func() {
+			const controlLoopPeriod = 5 * time.Millisecond
+
 			var prevFootSwitch bool
+			var prevLoggingEnabled bool
 			var logTimer time.Time
-			var usbCheckTimer time.Time
 			logIntervalDuration := time.Duration(data.LogSettings.IntervalMs) * time.Millisecond
 
 			for {
-				state.read(pins)
-				processCommands(&state, &data)
-				loop(&state, &data)
-				loggingLogic(&state, &data, &prevFootSwitch, &logTimer, &logIntervalDuration, &usbCheckTimer)
-				state.write(pins)
+				cycleStart := time.Now()
+
+				func() {
+					defer func() {
+						if recovered := recover(); recovered != nil {
+							reason := fmt.Sprintf("control loop panic: %v", recovered)
+							log.Printf("%s\n%s", reason, string(debug.Stack()))
+							hardwareError = errors.New(reason)
+							forceMachineSafeState(&state, pins, reason)
+							queueLogStop()
+						}
+					}()
+
+					state.read(pins)
+					processCommands(&state, &data)
+					loop(&state, &data)
+					loggingLogic(&state, &data, &prevFootSwitch, &prevLoggingEnabled, &logTimer, &logIntervalDuration)
+					state.write(pins)
+				}()
+
+				elapsed := time.Since(cycleStart)
+				if elapsed < controlLoopPeriod {
+					time.Sleep(controlLoopPeriod - elapsed)
+				}
 			}
 		}()
 
@@ -164,6 +203,8 @@ func main() {
 		mux.HandleFunc("/data", dataHandler(&data))
 		mux.HandleFunc("/command", commandHandler())
 		mux.HandleFunc("/auth", authHandler(&data))
+		mux.HandleFunc("/logs/device/download", deviceLogsDownloadHandler())
+		mux.HandleFunc("/health/logging", loggingHealthHandler(&data, &state))
 		mux.HandleFunc("/api/hardware-error", hardwareErrorAPIHandler())
 		mux.HandleFunc("/", rootHandler(&data))
 
@@ -177,6 +218,8 @@ func main() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/api/hardware-error", hardwareErrorAPIHandler())
 		mux.HandleFunc("/auth", authHandler(&data))
+		mux.HandleFunc("/logs/device/download", deviceLogsDownloadHandler())
+		mux.HandleFunc("/health/logging", loggingHealthHandler(&data, nil))
 		mux.HandleFunc("/", rootHandler(&data))
 
 		log.Println("starting HTTP server on :8080 (error mode)")
